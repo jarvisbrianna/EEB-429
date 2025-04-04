@@ -1,0 +1,245 @@
+---
+title: "Model building: nonlinearity"
+author: "Brianna Jarvis"
+output:
+  html_document: default
+  pdf_document: default
+language: R
+---
+
+<!-- To render the assignment in Rmarkdown, enter the command below in the R console -->
+<!-- rmarkdown::render("Class_23_Assignment.Rmd") -->
+
+```{r, echo=FALSE}
+	set.seed(123)
+	options(digits=5)
+```
+
+
+#### Due by the beginning of next Tuesday
+
+Save this Rmarkdown script as a file named “YourlastName_Assignment23.Rmd”. 
+For each question, fill out the answer and, where requested, 
+provide the relevant R code using "```" and the echo = TRUE argument.
+
+When finished, Knit your script together into an html report, 
+saved as “YourlastName_Assignment23.html” and upload the 
+resulting file to Canvas to turn it in.
+
+\
+
+**This homework assignment will test your abilities to:**
+
+1. think critically and creatively about model building
+
+2. extrapolate from in-class exercises to simulate data and do inference with a nonlinear model
+
+3. extrapolate from previous lecture materials to apply Bayes' Theorem to inference with a linear model
+
+4. hone your R skillz: function building, data visualization, etc.
+
+\
+
+### Question 1
+
+```{r,echo=FALSE}
+myfunc <- function(a,b,x){
+	return(exp(a+b*x)/(1+exp(a+b*x)))
+}
+
+x <- seq(-5,10,length.out=5e2)
+y <- myfunc(a=-15,b=1.5,x=x)
+plot(x,y,xlab="predictor",ylab="response",type="l",xlim=c(-10,12))
+```
+
+1a) What function is displayed above?
+
+--the function displayed above is the logistic function. 
+
+1b) Write out the mathematical form of the function,
+list its parameters, 
+and explain how each parameter affects the shape of the output.
+
+-- $y = \frac{e^{a+bx}}{1+e^{a+bx}}$
+
+-- **a** is the location parameter (shifts the curve left and right), **b** controls the steepness of the curve. **y** is the response variable, **x** is the predictor variable. 
+
+### Question 2
+
+1. Simulate a dataset of 1000 datapoints using a power-law deterministic 
+function and Gaussian-distributed errors with the following parameter values:
+
+	- a = 3
+	- b = 0.2
+	- $\sigma$ = 0.5
+
+Values of the predictor variable should vary between 0 and 100, 
+but may be generated however you wish.
+
+```{r}
+# generate predictor variable (x)
+x <- runif(1000, 0, 100)
+
+a <- 3
+b <- 0.2
+sigma <- 0.5
+
+# power-law deterministic function and Gaussian-distributed errors
+power.law.sim <- function(x,a,b,sigma){
+  y_det <- a *(x^b)
+  y <- y_det + rnorm(1000, mean=0, sd=sigma)
+  return(y)
+}
+
+```
+
+```{r}
+response <- power.law.sim(x=x,a=a,b=b,sigma=sigma)
+```
+
+Make a plot of the predictor plotted against the response with a 
+line overlain showing the expected relationship.
+
+```{r}
+plot(x, response)
+
+x_seq <- (seq(min(x), max(x), length.out=1000))
+y_expected <- 3 * (x_seq^0.2)
+lines(x_seq, y_expected, col="red", lwd=2)
+```
+
+### Question 3
+
+(a) Comment the code below and use it to estimate the parameter values used 
+to generate the dataset in the "nonLin_mysteryData.Robj" file. 
+
+b) Show traceplots of each parameter (a,b, $\sigma$) as well as of the posterior probability.
+
+c) Drop the first 20% of the iterations for each parameter (a,b, $\sigma$) and 
+visualize them using a histogram with overlaid lines indicating their 
+95% equal-tailed credible intervals.
+
+(hint: check out the function `quantile`)
+ 
+
+
+```{r mcmc}
+# define prior distribution for parameters a, b, and sigma
+pr <- function(a,b,sigma){
+	parPrior <- dnorm(a,mean=0,sd=1e4,log=TRUE) + # normal prior on a
+				dnorm(b,mean=0,sd=1e4,log=TRUE) + # normal prior on b
+				dexp(sigma,rate=1e-3) # exponential prior on sigma (must be > 0)
+	return(parPrior)
+}
+
+# exponential decay deterministic function
+detFunc <- function(a,b,x){
+	expY <- a*exp(-b*x)
+	return(expY)
+}
+
+# log-likelihood: compared model output to observed y
+lk <- function(y,x,a,b,sigma){
+	loglikelihood <- sum(
+						dnorm(x=y,
+							  mean=detFunc(a,b,x),
+							  sd=sigma,
+							  log=TRUE))
+  return(loglikelihood)
+}
+
+# log(prior) + log(likelihood) posterior (up to constant)
+bayesNum <- function(y,x,a,b,sigma) {
+	prior <- pr(a,b,sigma)
+	loglik <- lk(y,x,a,b,sigma)
+  	return(prior + loglik)
+}
+
+# load dataset
+load("nonLin_mysteryData.Robj")
+
+# MCMC settings
+nIter <- 5e3
+aa <- rep(NA,nIter)
+bb <- rep(NA,nIter)
+ss <- rep(NA,nIter)
+pp <- rep(NA,nIter)
+
+# initialize parameters
+a <- rnorm(1)
+b <- rnorm(1)
+sigma <- rexp(1)
+
+postprob <- bayesNum(y=y,x=x,a=a,b=b,sigma=sigma)
+
+# MCMC sampling loop
+for(i in 1:nIter){
+  # propose new parameters using random generation
+	a_prime <- a + rnorm(1,mean=0,sd=0.1)
+	b_prime <- b + rnorm(1,mean=0,sd=0.1)
+	sigma_prime <- sigma + rnorm(1,mean=0,sd=0.1)
+
+	# only accept if sigma_prime is positive
+	if(sigma_prime > 0){
+		postprob_prime <- bayesNum(y,x,a=a_prime,b=b_prime,sigma=sigma_prime)
+		R <- exp(postprob_prime - postprob)
+		U <- runif(1,0,1)
+		if(R > U){
+		  # accept proposal
+			a <- a_prime
+			b <- b_prime
+			sigma <- sigma_prime
+			postprob <- postprob_prime
+		}
+	}
+	
+	# store current samples
+		aa[i] <- a
+		bb[i] <- b
+		ss[i] <- sigma
+		pp[i] <- postprob
+}
+```
+
+```{r}
+# traceplots for all parameters and posterior probability
+
+par(mfrow = c(2, 2))
+plot(aa, type="l", col="blue", main="traceplot of a", ylab="a")
+plot(bb, type="l", col="purple", main="traceplot of b", ylab="b")
+plot(ss, type="l", col="green", main="traceplot of sigma", ylab="sigma")
+plot(pp, type="l", col="red", main="traceplot of posterior", ylab="log posterior")
+```
+
+```{r}
+# drop first 20% of samples 
+drop <- floor(0.2 * nIter)
+
+# remove first 20% from each parameter vector
+aa_post <- aa[-(1:drop)] # posterior samples for 'a'
+bb_post <- bb[-(1:drop)] # posterior samples for 'b'
+ss_post <- ss[-(1:drop)] # posterior samples for 'sigma'
+
+# compute 95% equal-tailed credible intervals
+ci.a <- quantile(aa_post, probs=c(0.025, 0.975))
+ci.b <- quantile(bb_post, probs=c(0.025, 0.975))
+ci.sigma <- quantile(ss_post, probs=c(0.025, 0.975))
+
+# visualize with histograms
+plot.posterior.Hist <- function(parameter, p.name){
+  hist(parameter, breaks=40, main=paste("posterior of", p.name),
+       xlab=p.name, col="lightblue")
+  ci <- quantile(parameter, probs=c(0.025, 0.975)) # computes CI in function
+  abline(v=ci, col="darkblue", lwd=2, lty=2) # adds CI lines
+  legend("topright", legend=paste("95% CI: [", round(ci[1], 3), ", ", 
+                                   round(ci[2], 3), "]"), bty="n")
+}
+
+# plot posteriors
+par(mfrow=c(1, 3))
+plot.posterior.Hist(aa_post, "a")
+plot.posterior.Hist(bb_post, "b")
+plot.posterior.Hist(ss_post, "sigma")
+```
+
+
